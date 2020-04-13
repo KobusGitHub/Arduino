@@ -5,6 +5,7 @@
 #include <WiFiUdp.h>
 
 int currentState = 0;
+int newState = 0;
 int newButtonState = 0;
 int ledPin = D1;
 int buttonPin = D5;
@@ -33,6 +34,12 @@ const String url = "/trigger/esppush/with/key/hKz5fItk_n_tyrrV7W5mystovzU3-tXUhw
 #define FIREBASE_AUTH "vw64nCLAm76sv8SHXjC3b0pntbD1C3T5gFVo9Hah"
 #define WIFI_SSID "DO_F62B"
 #define WIFI_PASSWORD "jonnyb55"
+static unsigned long last_checkDb_time = 0;
+
+// INTERRUPT
+static unsigned long last_interrupt_time = 0;
+int interruptFlag = 0;
+
 
 // the setup function runs once when you press reset or power the board
 void setup() {
@@ -42,6 +49,7 @@ void setup() {
   pinMode(buttonStopStartPin, INPUT_PULLUP);
   pinMode(LED_BUILTIN, OUTPUT); // Onboard LED -> Output
 
+  
 
   // CONNECTION
   Serial.println();
@@ -59,12 +67,18 @@ void setup() {
 
   // FIREBASE
   Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);
-
+   
   // Timer
   //timeClient.begin();
   
   timeClient.begin();
 
+
+  // INTERRUPT
+  attachInterrupt(digitalPinToInterrupt(buttonPin), stateChangeFn, CHANGE);
+  interruptFlag = 0;
+
+  
   // Switch onboard led on for one second showing app is now running
   digitalWrite(LED_BUILTIN, LOW); // Onboard LED -> ON
   delay(1000);
@@ -81,40 +95,44 @@ void loop() {
   }
   else 
   {
-    
-    newButtonState = digitalRead(buttonPin);
-    delay(100);
-    Serial.println(newButtonState);
 
-    
-    newDBState = firebaseRead();
-    delay(100);
-    Serial.println("DB: " + newDBState);
-  
-    
-    if(newButtonState == LOW || currentState != newDBState) { // GPIO pins is normally on. So we need to ground it for an event
-      if(currentState == 0){
-        digitalWrite(ledPin, HIGH);
-  
-        digitalWrite(LED_BUILTIN, LOW); // Onboard LED -> ON
-        currentState = 1;
-        firebaseWrite(1);
-        checkTime();
-        digitalWrite(LED_BUILTIN, HIGH); // Onboard LED -> OFF
-        
-      
-      } else {
+    if(interruptFlag == 1) {
+      interruptFlag = 0;
+      if(currentState == 1) {
         digitalWrite(ledPin, LOW);
-  
-        digitalWrite(LED_BUILTIN, LOW); // Onboard LED -> ON
         currentState = 0;
         firebaseWrite(0);
         doIftttCall();
-        digitalWrite(LED_BUILTIN, HIGH); // Onboard LED -> OFF
+      } else {
+        digitalWrite(ledPin, HIGH);
+        currentState = 1;
+        firebaseWrite(1);
       }
-      delay(100);
     }
+    delay(100);
 
+
+    unsigned long checkDb_time = millis();
+    if (checkDb_time - last_checkDb_time > 2000)
+    {
+      last_checkDb_time = checkDb_time;
+      
+      newDBState = firebaseRead();
+      delay(100);
+     
+      if(currentState != newDBState){
+        if(newDBState == 1){
+           digitalWrite(ledPin, HIGH);
+           currentState = 1;
+        } else {
+           digitalWrite(ledPin, LOW);
+           currentState = 0;
+           doIftttCall();
+        }
+        delay(100);
+      }
+     
+    }
   }
 }
 
@@ -275,5 +293,31 @@ void firebaseWrite(int state) {
 
   
  }
+
+
+
+
+ICACHE_RAM_ATTR void stateChangeFn() { // ICACHE_RAM_ATTR makes sure function runs in RAM
+  unsigned long interrupt_time = millis();
+  // If interrupts come faster than 200ms, assume it's a bounce and ignore
+  if (interrupt_time - last_interrupt_time > 1000)
+  {
+    
+    Serial.println("");
+    Serial.println("stateChangeFn()");
+
+//    if(currentState == 1) {
+//     firebaseWrite(0);
+//    } else {
+//     firebaseWrite(1);
+//    }
+    interruptFlag = 1;
+   
+  }
+  last_interrupt_time = interrupt_time;
+}
+
+
+
 
   
